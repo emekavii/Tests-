@@ -86,15 +86,29 @@ function nyToday() {
 }
 
 async function load() {
-  $("#content").innerHTML = '<p class="muted">Analizando… (con player props puede tardar un par de minutos)</p>';
+  const t0 = Date.now(), limit = $("#props").checked ? 240 : 90;
+  const tick = () => {
+    const secs = Math.round((Date.now() - t0) / 1000);
+    $("#content").innerHTML = `<p class="muted">Analizando… ${secs}s` +
+      (secs > 20 ? " (si la app estaba dormida en Render, la primera vez tarda más)" : "") + "</p>";
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
+  const ctrl = new AbortController();
+  const abort = setTimeout(() => ctrl.abort(), limit * 1000);
   const q = new URLSearchParams({ date: $("#day").value, props: $("#props").checked });
   try {
-    const res = await fetch("/api/analysis?" + q);
-    if (!res.ok) throw new Error(await res.text());
+    const res = await fetch("/api/analysis?" + q, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     data = await res.json();
     render();
   } catch (e) {
-    $("#content").innerHTML = `<div class="card warn">Error: ${esc(e.message)}</div>`;
+    const msg = e.name === "AbortError" ? `El servidor no respondió en ${limit} s.` : e.message;
+    $("#content").innerHTML = `<div class="card warn">Error: ${esc(msg)}<br>
+      <a href="/api/diagnostico" style="color:inherit">Abrir diagnóstico de fuentes</a></div>`;
+  } finally {
+    clearInterval(timer);
+    clearTimeout(abort);
   }
 }
 

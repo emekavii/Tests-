@@ -238,3 +238,52 @@ def test_nba_stats_circuit_breaker(monkeypatch):
     assert nba_stats.team_ratings("1999-00") == {}
     assert nba_stats.team_ratings("1999-00", last_n=10) == {}
     assert len(calls) == 1                                    # el segundo ni lo intenta
+
+
+def test_http_remembers_failures(monkeypatch, tmp_path):
+    import requests
+
+    from nba_bets import http
+
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append(url)
+        raise requests.ConnectTimeout("lento")
+
+    monkeypatch.setattr(http._session, "get", fake_get)
+    monkeypatch.setattr(http, "_down_hosts", {})
+    monkeypatch.setattr(http, "_failed_urls", {})
+    assert http.get_text("https://lenta.example/a", ttl=0) is None
+    assert http.get_text("https://lenta.example/b", ttl=0) is None   # misma web: ni lo intenta
+    assert calls == ["https://lenta.example/a"]
+
+
+def test_slow_tipsters_do_not_block(offline, monkeypatch):
+    import time
+
+    monkeypatch.setattr(engine, "TIPS_TIME_BUDGET", 0.5)
+    monkeypatch.setattr(scrapers, "tips_for_game", lambda game: time.sleep(3) or [])
+    t0 = time.time()
+    data = engine.analyze_day(date(2026, 10, 29), with_tips=True)
+    assert time.time() - t0 < 2.5
+    assert len(data["games"]) == 2
+
+
+def test_diagnostico(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from nba_bets import api
+
+    class Resp:
+        ok, status_code, headers = True, 200, {"x-requests-remaining": "480"}
+
+    def fake_get(url, **kw):
+        if "stats.nba.com" in url:
+            raise api.requests.ReadTimeout()
+        return Resp()
+
+    monkeypatch.setattr(api.requests, "get", fake_get)
+    out = TestClient(api.app).get("/api/diagnostico").json()
+    assert out["ESPN partidos"]["ok"] is True
+    assert out["stats.nba.com"] == {"ok": False, "error": "ReadTimeout", "segundos": 0.0}

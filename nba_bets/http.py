@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -44,17 +45,52 @@ def cache_set(key: str, value: Any) -> None:
         log.debug("No se pudo cachear %s: %s", key, exc)
 
 
+# Fallos recientes: así una web bloqueada no se reintenta en cada partido
+_failed_urls: dict[str, float] = {}
+_down_hosts: dict[str, float] = {}
+FAIL_TTL = 10 * 60
+
+
+def _host(url: str) -> str:
+    return urlparse(url).netloc
+
+
+def _skip(url: str) -> bool:
+    now = time.time()
+    return _failed_urls.get(url, 0) > now or _down_hosts.get(_host(url), 0) > now
+
+
+def _fetch(url: str, params: dict | None = None) -> requests.Response | None:
+    full = url + "?" + json.dumps(params or {}, sort_keys=True)
+    if _skip(full) or _skip(url):
+        return None
+    try:
+        resp = _session.get(url, params=params, timeout=settings.http_timeout)
+        resp.raise_for_status()
+        return resp
+    except requests.RequestException as exc:
+        log.warning("Error al pedir %s: %s", url, exc)
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (None, 403, 429) or status >= 500:
+            # Timeout, conexión rechazada o bloqueo: damos la web entera por caída un rato
+            _down_hosts[_host(url)] = time.time() + FAIL_TTL
+        else:
+            _failed_urls[full] = time.time() + FAIL_TTL
+        return None
+
+
 def get_json(url: str, params: dict | None = None, ttl: float = 300) -> Any | None:
     key = url + "?" + json.dumps(params or {}, sort_keys=True)
     cached = cache_get(key, ttl)
     if cached is not None:
         return cached
+    resp = _fetch(url, params)
+    if resp is None:
+        return None
     try:
-        resp = _session.get(url, params=params, timeout=settings.http_timeout)
-        resp.raise_for_status()
         data = resp.json()
-    except (requests.RequestException, ValueError) as exc:
-        log.warning("Error al pedir %s: %s", url, exc)
+    except ValueError as exc:
+        log.warning("Respuesta no JSON de %s: %s", url, exc)
         return None
     cache_set(key, data)
     return data
@@ -64,11 +100,8 @@ def get_text(url: str, ttl: float = 1800) -> str | None:
     cached = cache_get("text:" + url, ttl)
     if cached is not None:
         return cached
-    try:
-        resp = _session.get(url, timeout=settings.http_timeout)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        log.warning("Error al pedir %s: %s", url, exc)
+    resp = _fetch(url)
+    if resp is None:
         return None
     cache_set("text:" + url, resp.text)
     return resp.text

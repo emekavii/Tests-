@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 
@@ -17,6 +18,7 @@ log = logging.getLogger(__name__)
 
 TIP_BONUS = 0.015       # ajuste de probabilidad por cada web de tipsters que coincide
 TIP_BONUS_CAP = 0.03
+TIPS_TIME_BUDGET = 25    # segundos máximos para consultar webs de tipsters
 PROP_LABELS = {"points": "puntos", "rebounds": "rebotes", "assists": "asistencias",
                "threes": "triples", "pra": "puntos+reb+ast"}
 
@@ -235,6 +237,26 @@ def evaluate_props(game: Game, ratings: dict, league: dict, season_players: list
 
 # --------------------------------------------------------------------------- día completo
 
+def _collect_tips(games: list[Game]) -> dict[str, list[ExpertTip]]:
+    """Scraping de tipsters en paralelo con un límite de tiempo total: si las webs van lentas
+    o nos bloquean, seguimos sin sus pronósticos en vez de dejar la app colgada."""
+    out: dict[str, list[ExpertTip]] = {}
+    if not games:
+        return out
+    pool = ThreadPoolExecutor(max_workers=4)
+    futures = {pool.submit(scrapers.tips_for_game, g): g for g in games}
+    done, pending = wait(futures, timeout=TIPS_TIME_BUDGET)
+    for fut in done:
+        try:
+            out[futures[fut].id] = fut.result()
+        except Exception as exc:  # una web caída no debe tumbar el análisis
+            log.warning("Scraper falló para %s: %s", futures[fut].id, exc)
+    if pending:
+        log.warning("Tipsters: %d partidos sin respuesta en %ss", len(pending), TIPS_TIME_BUDGET)
+    pool.shutdown(wait=False, cancel_futures=True)
+    return out
+
+
 def analyze_day(day: date, with_props: bool = False, with_tips: bool | None = None) -> dict:
     with_tips = settings.enable_scrapers if with_tips is None else with_tips
     season = nba_stats.season_for(day)
@@ -275,6 +297,7 @@ def analyze_day(day: date, with_props: bool = False, with_tips: bool | None = No
             nba_stats.previous_season(season)) if not _find_player(season_players, p["name"])]
     b2b_teams = espn.teams_playing(day - timedelta(days=1))
 
+    all_tips = _collect_tips([g for g in games if g.status == "pre"]) if with_tips else {}
     result_games, top = [], []
     tips_found = False
     for game in games:
@@ -295,12 +318,7 @@ def analyze_day(day: date, with_props: bool = False, with_tips: bool | None = No
         if not ratings:
             proj.notes.append("Sin datos de equipos: proyección basada solo en el mercado")
 
-        tips = []
-        if with_tips and game.status == "pre":
-            try:
-                tips = scrapers.tips_for_game(game)
-            except Exception as exc:  # una web caída no debe tumbar el análisis
-                log.warning("Scraper falló para %s-%s: %s", game.away, game.home, exc)
+        tips = all_tips.get(game.id, [])
         tips_found = tips_found or bool(tips)
 
         markets = evaluate_markets(game, proj, tips) if ratings or game.prices else []

@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 import hmac
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import requests
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from . import engine
 from .config import settings
+from .http import USER_AGENT
 
 app = FastAPI(title="NBA Bets", description="Análisis de apuestas NBA")
 STATIC = Path(__file__).parent / "static"
@@ -93,3 +97,38 @@ def icon(size: int) -> FileResponse:
 @app.get("/api/analysis")
 def analysis(day: str | None = Query(None, alias="date"), props: bool = False, tips: bool | None = None) -> dict:
     return engine.analyze_day(_parse_day(day), with_props=props, with_tips=tips)
+
+
+DIAG_TARGETS = {
+    "ESPN partidos": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+    "ESPN clasificación": "https://site.api.espn.com/apis/v2/sports/basketball/nba/standings",
+    "stats.nba.com": "https://stats.nba.com/stats/scoreboardv2?GameDate=2025-01-15&LeagueID=00&DayOffset=0",
+    "The Odds API": "https://api.the-odds-api.com/v4/sports",      # este endpoint no gasta cuota
+    "sportsgambler": "https://www.sportsgambler.com/betting-tips/basketball/",
+    "scores24": "https://scores24.live/en/basketball",
+}
+
+
+@app.get("/api/diagnostico")
+def diagnostico() -> dict:
+    """Prueba cada fuente desde el servidor (sin caché) y dice si responde y cuánto tarda."""
+    headers = {"User-Agent": USER_AGENT, "Referer": "https://www.nba.com/", "Origin": "https://www.nba.com"}
+
+    def probe(item):
+        name, url = item
+        params = {"apiKey": settings.odds_api_key} if name == "The Odds API" and settings.odds_api_key else None
+        t0 = time.time()
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=10)
+            result = {"ok": resp.ok, "http": resp.status_code}
+            if name == "The Odds API":
+                result["cuota_restante"] = resp.headers.get("x-requests-remaining")
+                if not settings.odds_api_key:
+                    result["nota"] = "sin ODDS_API_KEY configurada"
+        except requests.RequestException as exc:
+            result = {"ok": False, "error": type(exc).__name__}
+        result["segundos"] = round(time.time() - t0, 1)
+        return name, result
+
+    with ThreadPoolExecutor(max_workers=len(DIAG_TARGETS)) as pool:
+        return dict(pool.map(probe, DIAG_TARGETS.items()))

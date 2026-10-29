@@ -39,7 +39,7 @@ class Settings:
     enable_scrapers: bool = os.environ.get("ENABLE_SCRAPERS", "1") == "1"
     max_prop_players: int = int(_float("MAX_PROP_PLAYERS", 8))
     cache_dir: Path = Path(os.environ.get("CACHE_DIR", ".cache"))
-    http_timeout: float = _float("HTTP_TIMEOUT", 15)
+    http_timeout: float = _float("HTTP_TIMEOUT", 8)
     app_password: str = os.environ.get("APP_PASSWORD", "")
 
 
