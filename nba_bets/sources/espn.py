@@ -175,3 +175,38 @@ def parse_injuries(data: dict) -> list[Injury]:
 
 def get_injuries() -> list[Injury]:
     return parse_injuries(fetch_injuries_raw() or {})
+
+
+STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/basketball/nba/standings"
+FALLBACK_PACE = 99.5
+
+
+def fetch_standings(season_end_year: int) -> dict | None:
+    return http.get_json(STANDINGS_URL, {"season": season_end_year}, ttl=3 * 3600)
+
+
+def parse_standings_ratings(data: dict) -> dict[str, dict]:
+    """Ratings aproximados a partir de puntos a favor/en contra por partido.
+
+    Plan B cuando stats.nba.com no responde: sin datos de posesiones asumimos el mismo
+    ritmo para todos, así que off/def son puntos por 100 posesiones "nominales".
+    """
+    out: dict[str, dict] = {}
+    groups = (data or {}).get("children") or [data or {}]
+    for group in groups:
+        for entry in ((group.get("standings") or {}).get("entries") or []):
+            abbr = to_abbr(((entry.get("team") or {}).get("abbreviation")) or "") or to_abbr(
+                ((entry.get("team") or {}).get("displayName")) or "")
+            stats = {str(s.get("name") or s.get("type") or "").lower(): s.get("value")
+                     for s in entry.get("stats") or []}
+            pf, pa = stats.get("avgpointsfor"), stats.get("avgpointsagainst")
+            if not abbr or not pf or not pa:
+                continue
+            games = int((stats.get("wins") or 0) + (stats.get("losses") or 0))
+            out[abbr] = {"off": pf * 100 / FALLBACK_PACE, "def": pa * 100 / FALLBACK_PACE,
+                         "pace": FALLBACK_PACE, "games": games}
+    return out
+
+
+def team_ratings(season_end_year: int) -> dict[str, dict]:
+    return parse_standings_ratings(fetch_standings(season_end_year) or {})

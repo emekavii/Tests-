@@ -15,6 +15,19 @@ from ..teams import to_abbr
 log = logging.getLogger(__name__)
 
 _last_call = 0.0
+_down_until = 0.0
+TIMEOUT = 10          # segundos; desde servidores en la nube stats.nba.com suele colgarse
+DOWN_PAUSE = 15 * 60  # si falla, no lo volvemos a intentar en 15 minutos
+
+
+def available() -> bool:
+    return time.time() >= _down_until
+
+
+def _mark_down(exc: Exception) -> None:
+    global _down_until
+    _down_until = time.time() + DOWN_PAUSE
+    log.warning("stats.nba.com no responde (%s); se usarán datos de ESPN durante 15 min", exc)
 
 
 def _throttle() -> None:
@@ -46,6 +59,8 @@ def team_ratings(season: str, last_n: int = 0) -> dict[str, dict]:
     cached = http.cache_get(key, ttl=6 * 3600)
     if cached is not None:
         return cached
+    if not available():
+        return {}
     try:
         from nba_api.stats.endpoints import leaguedashteamstats
 
@@ -55,10 +70,10 @@ def team_ratings(season: str, last_n: int = 0) -> dict[str, dict]:
             measure_type_detailed_defense="Advanced",
             per_mode_detailed="PerGame",
             last_n_games=last_n,
-            timeout=30,
+            timeout=TIMEOUT,
         ))
     except Exception as exc:  # nba_api lanza excepciones muy variadas (timeouts, JSON vacío...)
-        log.warning("No se pudieron obtener ratings NBA (%s, last %s): %s", season, last_n, exc)
+        _mark_down(exc)
         return {}
     out = {}
     for r in rows:
@@ -76,14 +91,16 @@ def player_season_stats(season: str) -> list[dict]:
     cached = http.cache_get(key, ttl=6 * 3600)
     if cached is not None:
         return cached
+    if not available():
+        return []
     try:
         from nba_api.stats.endpoints import leaguedashplayerstats
 
         _throttle()
         rows = _frame_records(leaguedashplayerstats.LeagueDashPlayerStats(
-            season=season, per_mode_detailed="PerGame", timeout=30))
+            season=season, per_mode_detailed="PerGame", timeout=TIMEOUT))
     except Exception as exc:
-        log.warning("No se pudieron obtener stats de jugadores (%s): %s", season, exc)
+        _mark_down(exc)
         return []
     out = [{
         "id": r["PLAYER_ID"], "name": r["PLAYER_NAME"], "team": to_abbr(r.get("TEAM_ABBREVIATION", "")),
@@ -117,13 +134,15 @@ def player_game_log(pid: int, season: str) -> list[dict]:
     cached = http.cache_get(key, ttl=3 * 3600)
     if cached is not None:
         return cached
+    if not available():
+        return []
     try:
         from nba_api.stats.endpoints import playergamelog
 
         _throttle()
-        rows = _frame_records(playergamelog.PlayerGameLog(player_id=pid, season=season, timeout=30))
+        rows = _frame_records(playergamelog.PlayerGameLog(player_id=pid, season=season, timeout=TIMEOUT))
     except Exception as exc:
-        log.warning("Sin game log para %s (%s): %s", pid, season, exc)
+        _mark_down(exc)
         return []
     out = [{"date": r["GAME_DATE"], "matchup": r["MATCHUP"], "min": r["MIN"], "pts": r["PTS"],
             "reb": r["REB"], "ast": r["AST"], "fg3m": r["FG3M"]} for r in rows]

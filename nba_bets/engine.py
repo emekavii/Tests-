@@ -257,8 +257,15 @@ def analyze_day(day: date, with_props: bool = False, with_tips: bool | None = No
         season_r = team_model.early_season_blend(season_r, prev_r)
     ratings = {t: team_model.blend_ratings(season_r.get(t), recent_r.get(t))
                for t in set(season_r) | set(recent_r)}
-    league = team_model.league_average(ratings)
     status["nba_stats"] = bool(ratings)
+    if not ratings:
+        # Plan B (típico en servidores en la nube): puntos a favor/en contra de la clasificación de ESPN
+        end_year = int(season[:4]) + 1
+        ratings = team_model.early_season_blend(espn.team_ratings(end_year), espn.team_ratings(end_year - 1))
+        ratings = {t: r for t, r in ratings.items() if r}
+        if ratings:
+            status["nba_stats"] = "no responde (usando clasificación de ESPN)"
+    league = team_model.league_average(ratings)
 
     injuries = espn.get_injuries()
     status["injuries"] = bool(injuries)
@@ -286,7 +293,7 @@ def analyze_day(day: date, with_props: bool = False, with_tips: bool | None = No
             home_injury_pts=out_impact(game.home), away_injury_pts=out_impact(game.away),
         )
         if not ratings:
-            proj.notes.append("Sin datos de stats.nba.com: proyección basada solo en el mercado")
+            proj.notes.append("Sin datos de equipos: proyección basada solo en el mercado")
 
         tips = []
         if with_tips and game.status == "pre":

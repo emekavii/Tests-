@@ -98,11 +98,20 @@ async function load() {
   }
 }
 
+function sourceWarning() {
+  const s = data.sources, w = [];
+  if (s.espn === false) w.push("No se pudo conectar con ESPN (partidos y cuotas). Puede ser un fallo temporal: vuelve a intentarlo en unos minutos.");
+  if (s.nba_stats === false) w.push("No hay estadísticas de equipos (ni stats.nba.com ni ESPN), así que no se calculan recomendaciones.");
+  if (s.odds_api === false) w.push("The Odds API no respondió: revisa que la clave ODDS_API_KEY sea correcta y te quede cuota.");
+  return w.map((t) => `<div class="card warn">${esc(t)}</div>`).join("");
+}
+
 function renderTop() {
+  if (!data.games.length) return sourceWarning() + `<div class="card">No hay partidos NBA el ${esc(data.date)}. Prueba con otra fecha.</div>`;
   if (!data.top_picks.length)
-    return '<div class="card">Hoy ninguna apuesta supera el umbral de valor (EV ≥ ' + pct(data.settings.min_edge) +
+    return sourceWarning() + '<div class="card">Hoy ninguna apuesta supera el umbral de valor (EV ≥ ' + pct(data.settings.min_edge) +
       '). No apostar también es una buena decisión.</div>';
-  return '<div class="grid">' + data.top_picks.map((m) => `
+  return sourceWarning() + '<div class="grid">' + data.top_picks.map((m) => `
     <div class="card">
       <div class="muted">${esc(m.game)} · ${MARKET[m.market] || m.market}</div>
       <div class="pick">${esc(m.label)}</div>

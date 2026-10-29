@@ -205,3 +205,36 @@ def test_password_and_home_screen_assets(offline, monkeypatch):
     assert client.get("/?key=secreto").status_code == 200       # guarda la cookie
     res = client.get("/api/analysis", params={"date": "2026-10-29", "tips": "false"})
     assert res.status_code == 200
+
+
+def test_espn_fallback_when_nba_stats_down(offline, monkeypatch):
+    standings = {"children": [{"standings": {"entries": [
+        {"team": {"abbreviation": abbr}, "stats": [
+            {"name": "avgPointsFor", "value": pf}, {"name": "avgPointsAgainst", "value": pa},
+            {"name": "wins", "value": 30}, {"name": "losses", "value": 10}]}
+        for abbr, pf, pa in (("BOS", 120, 108), ("NY", 112, 113), ("LAL", 115, 115), ("GS", 116, 114))]}}]}
+    assert espn.parse_standings_ratings(standings)["NYK"]["off"] == pytest.approx(112 * 100 / 99.5)
+    monkeypatch.setattr(nba_stats, "team_ratings", lambda season, last_n=0: {})
+    monkeypatch.setattr(espn, "fetch_standings", lambda year: standings)
+    data = engine.analyze_day(date(2026, 10, 29), with_tips=False)
+    assert "ESPN" in data["sources"]["nba_stats"]
+    g = data["games"][0]
+    assert g["projection"]["margin"] > 5                      # BOS mucho mejor que NYK
+    assert any(m["recommended"] for m in g["markets"]) or data["top_picks"] == []
+
+
+def test_nba_stats_circuit_breaker(monkeypatch):
+    import nba_api.stats.endpoints.leaguedashteamstats as lds
+
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise TimeoutError("bloqueado")
+
+    monkeypatch.setattr(lds, "LeagueDashTeamStats", boom)
+    monkeypatch.setattr(nba_stats, "_down_until", 0.0)
+    monkeypatch.setattr(nba_stats, "_throttle", lambda: None)
+    assert nba_stats.team_ratings("1999-00") == {}
+    assert nba_stats.team_ratings("1999-00", last_n=10) == {}
+    assert len(calls) == 1                                    # el segundo ni lo intenta
