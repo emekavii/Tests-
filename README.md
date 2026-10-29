@@ -26,6 +26,36 @@ python -m nba_bets picks --date 2026-11-02 --no-tips
 El panel tiene cuatro pestañas: **Mejores apuestas**, **Partidos** (proyección, mercados, lesiones,
 pronósticos de tipsters), **Player props** y **Fuentes** (qué fuentes respondieron).
 
+## Usarla en el iPhone
+
+### Publicarla en internet con Render (gratis)
+
+1. Crea una cuenta en [render.com](https://render.com) entrando con GitHub.
+2. **New +** → **Blueprint** → elige este repositorio y la rama. Render lee `render.yaml`.
+3. Te pedirá dos valores:
+   - `ODDS_API_KEY`: tu clave de [the-odds-api.com](https://the-odds-api.com) (puedes dejarla vacía).
+   - `APP_PASSWORD`: una contraseña para que nadie más use tu app ni gaste tu cuota de cuotas.
+4. Al terminar tendrás una dirección tipo `https://nba-bets-xxxx.onrender.com`.
+
+### Instalarla como app
+
+1. En Safari abre `https://nba-bets-xxxx.onrender.com/?key=TU_CONTRASEÑA`.
+2. Botón **Compartir** → **Añadir a pantalla de inicio**. Tendrás un icono que se abre a pantalla
+   completa, como una app, y no te volverá a pedir la contraseña.
+
+Notas del plan gratuito de Render: si nadie la usa en 15 minutos se "duerme" y la primera carga
+tarda ~1 minuto. Además stats.nba.com suele bloquear servidores en la nube: la app seguirá
+funcionando con ESPN y The Odds API, pero las proyecciones (sobre todo de player props) son peores.
+La pestaña **Fuentes** te dice qué datos han llegado.
+
+### Alternativa: desde tu ordenador, en la misma Wi‑Fi
+
+```bash
+python -m nba_bets serve --host 0.0.0.0
+```
+
+Y en el iPhone abre `http://IP-DE-TU-ORDENADOR:8000`. Aquí stats.nba.com sí funciona.
+
 ## Fuentes de datos
 
 | Fuente | Qué aporta | Clave |

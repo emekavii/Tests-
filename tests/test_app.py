@@ -186,3 +186,22 @@ def test_api_endpoint(offline):
     assert res.status_code == 200
     assert res.json()["date"] == "2026-10-29"
     assert client.get("/api/analysis", params={"date": "ayer"}).status_code == 400
+
+
+def test_password_and_home_screen_assets(offline, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from nba_bets import api
+    from nba_bets.config import Settings
+
+    monkeypatch.setattr(api, "settings", Settings(app_password="secreto"))
+    client = TestClient(api.app)
+    # Icono y manifest accesibles sin contraseña (iOS los pide sin cookies)
+    assert client.get("/icon-180.png").headers["content-type"] == "image/png"
+    assert client.get("/manifest.webmanifest").json()["display"] == "standalone"
+    assert client.get("/").status_code == 401
+    assert client.get("/api/analysis").status_code == 401
+    assert client.get("/?key=mala").status_code == 401
+    assert client.get("/?key=secreto").status_code == 200       # guarda la cookie
+    res = client.get("/api/analysis", params={"date": "2026-10-29", "tips": "false"})
+    assert res.status_code == 200
