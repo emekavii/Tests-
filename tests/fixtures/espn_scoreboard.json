@@ -1,0 +1,16 @@
+{"events": [
+ {"id": "401700001", "date": "2026-10-29T23:30Z", "status": {"type": {"state": "pre"}},
+  "competitions": [{"competitors": [
+     {"homeAway": "home", "team": {"abbreviation": "BOS", "displayName": "Boston Celtics"}, "records": [{"summary": "3-1"}]},
+     {"homeAway": "away", "team": {"abbreviation": "NY", "displayName": "New York Knicks"}, "records": [{"summary": "2-2"}]}],
+   "odds": [{"provider": {"name": "ESPN BET"}, "details": "BOS -5.5", "overUnder": 221.5, "spread": -5.5,
+             "homeTeamOdds": {"moneyLine": -220}, "awayTeamOdds": {"moneyLine": 180}}]}]},
+ {"id": "401700002", "date": "2026-10-30T02:00Z", "status": {"type": {"state": "pre"}},
+  "competitions": [{"competitors": [
+     {"homeAway": "home", "team": {"abbreviation": "LAL", "displayName": "Los Angeles Lakers"}},
+     {"homeAway": "away", "team": {"abbreviation": "GS", "displayName": "Golden State Warriors"}}],
+   "odds": [{"provider": {"name": "DraftKings"}, "details": "GS -2",
+             "moneyline": {"home": {"close": {"odds": "+110"}}, "away": {"close": {"odds": "-130"}}},
+             "pointSpread": {"home": {"close": {"line": "+2", "odds": "-108"}}, "away": {"close": {"line": "-2", "odds": "-112"}}},
+             "total": {"over": {"close": {"line": "o229.5", "odds": "-110"}}, "under": {"close": {"line": "u229.5", "odds": "-110"}}}}]}]}
+]}

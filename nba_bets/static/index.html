@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBA Bets</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #16181d; --muted: #6b7280; --border: #e3e5e9;
+    --accent: #c2410c; --good: #15803d; --bad: #b91c1c; --chip: #eef0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --card: #181b21; --text: #e8eaed; --muted: #9aa0a8; --border: #2a2e36;
+            --accent: #fb923c; --good: #4ade80; --bad: #f87171; --chip: #232730; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 span { color: var(--accent); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  input, button, label.toggle { font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); }
+  button { cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent); }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 16px 40px; }
+  nav { display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto; }
+  nav button { background: var(--card); color: var(--text); border-color: var(--border); white-space: nowrap; }
+  nav button.active { background: var(--text); color: var(--bg); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .row { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 2px 9px; font-size: 12px; margin: 2px 4px 2px 0; }
+  .chip.good { color: var(--good); } .chip.bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.rec td { font-weight: 600; }
+  .ev-pos { color: var(--good); } .ev-neg { color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  .pick { font-size: 17px; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .warn { border-left: 3px solid var(--accent); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NBA <span>Bets</span></h1>
+  <div class="controls">
+    <input type="date" id="day">
+    <label class="toggle"><input type="checkbox" id="props"> Player props</label>
+    <button id="load">Analizar</button>
+  </div>
+</header>
+<main>
+  <nav>
+    <button data-tab="top" class="active">Mejores apuestas</button>
+    <button data-tab="games">Partidos</button>
+    <button data-tab="props">Player props</button>
+    <button data-tab="info">Fuentes</button>
+  </nav>
+  <div id="content"><p class="muted">Pulsa «Analizar» para cargar los partidos.</p></div>
+  <p class="muted">Herramienta informativa. Ningún modelo garantiza beneficios; apuesta solo lo que puedas permitirte perder. +18.</p>
+</main>
+<script>
+const MARKET = { moneyline: "Ganador", spread: "Hándicap", total: "Over/Under", prop: "Player prop" };
+const STATUS = { pre: "Por jugar", in: "En juego", post: "Finalizado" };
+let data = null, tab = "top";
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pct = (x) => x == null ? "–" : (x * 100).toFixed(1) + "%";
+const ev = (x) => `<span class="${x > 0 ? "ev-pos" : "ev-neg"}">${x > 0 ? "+" : ""}${(x * 100).toFixed(1)}%</span>`;
+const time = (iso) => iso ? new Date(iso).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) : "";
+
+function nyToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+}
+
+async function load() {
+  $("#content").innerHTML = '<p class="muted">Analizando… (con player props puede tardar un par de minutos)</p>';
+  const q = new URLSearchParams({ date: $("#day").value, props: $("#props").checked });
+  try {
+    const res = await fetch("/api/analysis?" + q);
+    if (!res.ok) throw new Error(await res.text());
+    data = await res.json();
+    render();
+  } catch (e) {
+    $("#content").innerHTML = `<div class="card warn">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderTop() {
+  if (!data.top_picks.length)
+    return '<div class="card">Hoy ninguna apuesta supera el umbral de valor (EV ≥ ' + pct(data.settings.min_edge) +
+      '). No apostar también es una buena decisión.</div>';
+  return '<div class="grid">' + data.top_picks.map((m) => `
+    <div class="card">
+      <div class="muted">${esc(m.game)} · ${MARKET[m.market] || m.market}</div>
+      <div class="pick">${esc(m.label)}</div>
+      <div class="row" style="margin-top:6px">
+        <span>Cuota <b>${m.odds}</b> <span class="muted">${esc(m.book || "")}</span></span>
+        <span>EV ${ev(m.ev)}</span>
+      </div>
+      <div class="row muted">
+        <span>Prob. ${pct(m.prob)}${m.fair_odds ? " · cuota justa " + m.fair_odds : ""}</span>
+        <span>Stake ${m.stake} u</span>
+      </div>
+      <div>
+        <span class="chip">Confianza ${esc(m.confidence || "-")}</span>
+        ${(m.tips_agree || []).map((s) => `<span class="chip good">✓ ${esc(s)}</span>`).join("")}
+        ${m.hit_rate ? `<span class="chip">Supera la línea ${m.hit_rate[0]}/${m.hit_rate[1]} últimos</span>` : ""}
+        ${m.projection != null ? `<span class="chip">Proyección ${m.projection}</span>` : ""}
+      </div>
+    </div>`).join("") + "</div>";
+}
+
+function marketsTable(g) {
+  if (!g.markets.length) return '<p class="muted">Sin cuotas disponibles.</p>';
+  return `<div class="scroll"><table>
+    <tr><th>Apuesta</th><th class="num">Cuota</th><th class="num">Modelo</th><th class="num">Mercado</th><th class="num">Final</th><th class="num">EV</th></tr>
+    ${g.markets.map((m) => `<tr class="${m.recommended ? "rec" : ""}">
+      <td>${m.recommended ? "★ " : ""}${esc(m.label)}</td><td class="num">${m.odds}</td>
+      <td class="num">${pct(m.model_prob)}</td><td class="num">${pct(m.market_prob)}</td>
+      <td class="num">${pct(m.prob)}</td><td class="num">${ev(m.ev)}</td></tr>`).join("")}
+  </table></div>`;
+}
+
+function renderGames() {
+  if (!data.games.length) return '<div class="card">No hay partidos para esta fecha.</div>';
+  return data.games.map((g) => {
+    const p = g.projection;
+    const score = g.home_score != null && g.status !== "pre" ? ` · ${g.away_score}-${g.home_score}` : "";
+    return `<div class="card">
+      <div class="row">
+        <div><b>${esc(g.away_name)}</b> <span class="muted">${esc(g.away_record)}</span> @ <b>${esc(g.home_name)}</b> <span class="muted">${esc(g.home_record)}</span></div>
+        <div class="muted">${STATUS[g.status] || g.status} ${time(g.start)}${score}</div>
+      </div>
+      <div style="margin:8px 0">
+        <span class="chip">Proyección ${g.away} ${p.away_pts} – ${g.home} ${p.home_pts}</span>
+        <span class="chip">Total ${p.total}</span>
+        <span class="chip">Gana local ${pct(p.p_home_win)}</span>
+        ${g.home_b2b ? '<span class="chip bad">Local B2B</span>' : ""}${g.away_b2b ? '<span class="chip bad">Visitante B2B</span>' : ""}
+      </div>
+      ${g.best_pick ? `<div>Mejor apuesta: <b>${esc(g.best_pick.label)}</b> @ ${g.best_pick.odds} (EV ${ev(g.best_pick.ev)})</div>` : '<div class="muted">Sin apuesta con valor en este partido.</div>'}
+      <details><summary>Mercados, lesiones y pronósticos externos</summary>
+        ${marketsTable(g)}
+        <p><b>Lesiones:</b> ${g.injuries.length ? g.injuries.map((i) => `<span class="chip ${i.status.toLowerCase() === "out" ? "bad" : ""}">${esc(i.team)} · ${esc(i.player)} (${esc(i.status)})</span>`).join("") : '<span class="muted">sin bajas reportadas</span>'}</p>
+        <p><b>Tipsters:</b> ${g.tips.length ? g.tips.map((t) => `<span class="chip" title="${esc(t.text)}">${esc(t.source)}: ${MARKET[t.market]} ${esc(t.selection)} ${t.point ?? ""}</span>`).join("") : '<span class="muted">sin pronósticos encontrados</span>'}</p>
+        <p class="muted">${p.notes.map(esc).join(" · ")}</p>
+      </details>
+    </div>`;
+  }).join("");
+}
+
+function renderProps() {
+  const rows = data.games.flatMap((g) => g.props.map((p) => ({ ...p, game: `${g.away} @ ${g.home}` })));
+  if (!rows.length) return '<div class="card">Activa «Player props» y vuelve a analizar. Con clave de The Odds API verás las líneas de las casas; sin ella, solo proyecciones.</div>';
+  const withLine = rows.filter((r) => r.line != null), proj = rows.filter((r) => r.line == null);
+  let html = "";
+  if (withLine.length) html += `<div class="card scroll"><table>
+    <tr><th>Partido</th><th>Apuesta</th><th class="num">Cuota</th><th class="num">Proy.</th><th class="num">Últ. 10</th><th class="num">Prob.</th><th class="num">EV</th></tr>
+    ${withLine.map((r) => `<tr class="${r.recommended ? "rec" : ""}"><td class="muted">${esc(r.game)}</td><td>${r.recommended ? "★ " : ""}${esc(r.label)}</td>
+      <td class="num">${r.odds}</td><td class="num">${r.projection}</td><td class="num">${r.hit_rate ? r.hit_rate[0] + "/" + r.hit_rate[1] : "–"}</td>
+      <td class="num">${pct(r.prob)}</td><td class="num">${ev(r.ev)}</td></tr>`).join("")}
+  </table></div>`;
+  if (proj.length) html += `<div class="card scroll"><p class="muted">Proyecciones (compara con la línea de tu casa de apuestas)</p><table>
+    <tr><th>Jugador</th><th>Partido</th><th class="num">Pts</th><th class="num">Reb</th><th class="num">Ast</th><th class="num">Triples</th><th class="num">PRA</th></tr>
+    ${proj.map((r) => `<tr><td>${esc(r.player)}</td><td class="muted">${esc(r.game)}</td>
+      ${["points", "rebounds", "assists", "threes", "pra"].map((k) => `<td class="num">${r.projections[k] ?? "–"}</td>`).join("")}</tr>`).join("")}
+  </table></div>`;
+  return html;
+}
+
+function renderInfo() {
+  const label = { espn: "ESPN (partidos y cuotas)", odds_api: "The Odds API (cuotas y props)", nba_stats: "stats.nba.com (ratings)",
+                  injuries: "Lesiones (ESPN)", scrapers: "sportsgambler / scores24" };
+  return `<div class="card"><p>Temporada ${esc(data.season)} · generado ${new Date(data.generated_at).toLocaleString("es-ES")}</p>
+    ${Object.entries(data.sources).map(([k, v]) => `<div class="row"><span>${label[k] || k}</span><span class="chip ${v === true ? "good" : v === false ? "bad" : ""}">${v === true ? "OK" : v === false ? "sin datos" : esc(v)}</span></div>`).join("")}
+    <p class="muted">Bankroll ${data.settings.bankroll} u · EV mínimo ${pct(data.settings.min_edge)} · peso del modelo ${pct(data.settings.model_weight)}</p></div>`;
+}
+
+function render() {
+  if (!data) return;
+  $("#content").innerHTML = { top: renderTop, games: renderGames, props: renderProps, info: renderInfo }[tab]();
+}
+
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
+  tab = b.dataset.tab; render();
+}));
+$("#load").addEventListener("click", load);
+$("#day").value = nyToday();
+load();
+</script>
+</body>
+</html>
